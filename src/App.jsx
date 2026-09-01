@@ -146,6 +146,9 @@ export default function ArcTracker() {
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [modalRoutine, setModalRoutine] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [tasks, setTasks] = useState([]);
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [taskModalDate, setTaskModalDate] = useState(todayKey());
   const [confirmReset, setConfirmReset] = useState(false);
   const isDesktop = useIsDesktop();
   const saveTimer = useRef(null);
@@ -174,6 +177,7 @@ export default function ArcTracker() {
         if (data.routines?.length) setRoutines(data.routines);
         if (data.logs) setLogs(data.logs);
         if (typeof data.darkMode === 'boolean') setDarkMode(data.darkMode);
+        if (Array.isArray(data.tasks)) setTasks(data.tasks);
         setUserName(typeof data.userName === 'string' ? data.userName : (user.displayName || ''));
       } else {
         setUserName(user.displayName || '');
@@ -189,11 +193,11 @@ export default function ArcTracker() {
     if (!loaded || !user) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      setDoc(doc(db, 'users', user.uid), { routines, logs, darkMode, userName }, { merge: true })
+      setDoc(doc(db, 'users', user.uid), { routines, logs, darkMode, userName, tasks }, { merge: true })
         .catch((e) => console.error('Save failed', e));
     }, 500);
     return () => clearTimeout(saveTimer.current);
-  }, [routines, logs, darkMode, userName, loaded, user]);
+  }, [routines, logs, darkMode, userName, tasks, loaded, user]);
 
   const toggleRoutine = useCallback((dateStr, routineId) => {
     setLogs(prev => {
@@ -335,6 +339,18 @@ export default function ArcTracker() {
   function deleteRoutine(id) {
     setRoutines(prev => prev.filter(r => r.id !== id));
   }
+  function addTask({ name, date, notes }) {
+    setTasks(prev => [...prev, { id: uid(), name: name.trim(), date, notes: notes || '', completed: false, completedAt: null, createdAt: todayKey() }]);
+    setShowTaskModal(false);
+  }
+  function toggleTask(id) {
+    setTasks(prev => prev.map(t => t.id === id
+      ? { ...t, completed: !t.completed, completedAt: !t.completed ? new Date().toTimeString().slice(0, 5) : null }
+      : t));
+  }
+  function deleteTask(id) {
+    setTasks(prev => prev.filter(t => t.id !== id));
+  }
   function moveRoutine(id, dir) {
     setRoutines(prev => {
       const list = [...prev].sort((a, b) => a.order - b.order);
@@ -460,6 +476,10 @@ export default function ArcTracker() {
               overallCurrentStreak={overallCurrentStreak}
               onAdd={() => { setModalRoutine(null); setShowModal(true); }}
               userName={userName}
+              tasks={tasks.filter(t => t.date === todayKey())}
+              onToggleTask={toggleTask}
+              onDeleteTask={deleteTask}
+              onAddTask={() => { setTaskModalDate(todayKey()); setShowTaskModal(true); }}
             />
           )}
           {view === 'calendar' && (
@@ -470,6 +490,10 @@ export default function ArcTracker() {
               selectedStats={selectedStats}
               onToggle={(rid) => toggleRoutine(selectedDate, rid)}
               isDesktop={isDesktop}
+              tasks={tasks.filter(t => t.date === selectedDate)}
+              onToggleTask={toggleTask}
+              onDeleteTask={deleteTask}
+              onAddTask={() => { setTaskModalDate(selectedDate); setShowTaskModal(true); }}
             />
           )}
           {view === 'stats' && (
@@ -532,6 +556,13 @@ export default function ArcTracker() {
           onClose={() => { setShowModal(false); setModalRoutine(null); }}
         />
       )}
+      {showTaskModal && (
+        <TaskModal
+          defaultDate={taskModalDate}
+          onSave={addTask}
+          onClose={() => setShowTaskModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -584,7 +615,7 @@ function PageWrap({ children, isDesktop }) {
   );
 }
 
-function HomeView({ routines, logs, stats, onToggle, isDesktop, overallCurrentStreak, onAdd, userName }) {
+function HomeView({ routines, logs, stats, onToggle, isDesktop, overallCurrentStreak, onAdd, userName, tasks, onToggleTask, onDeleteTask, onAddTask }) {
   const dayStr = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   const hour = new Date().getHours();
   const base = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -629,7 +660,48 @@ function HomeView({ routines, logs, stats, onToggle, isDesktop, overallCurrentSt
           <RoutineRow key={r.id} routine={r} done={!!logs[todayKey()]?.[r.id]?.completed} time={logs[todayKey()]?.[r.id]?.time} onToggle={() => onToggle(r.id)} />
         ))
       )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '28px 0 10px' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>Today's tasks</span>
+        <button onClick={onAddTask} style={{ display: 'flex', alignItems: 'center', gap: 4, border: 'none', background: 'transparent', color: 'var(--accent)', fontWeight: 600, fontSize: 13 }}>
+          <Plus size={15} /> Add task
+        </button>
+      </div>
+      {tasks.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '22px 20px', border: '1px dashed var(--border)', borderRadius: 16, fontSize: 13, color: 'var(--text-muted)' }}>
+          No one-off tasks for today. These are for things you only need to do once — not recurring routines.
+        </div>
+      ) : (
+        tasks.map(t => (
+          <TaskRow key={t.id} task={t} onToggle={() => onToggleTask(t.id)} onDelete={() => onDeleteTask(t.id)} />
+        ))
+      )}
     </PageWrap>
+  );
+}
+
+function TaskRow({ task, onToggle, onDelete }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px',
+      background: 'var(--surface)', borderRadius: 16, border: '1px dashed var(--border)', marginBottom: 10,
+    }}>
+      <button className="arc-checkbox" onClick={onToggle} style={{
+        width: 32, height: 32, borderRadius: 10, flexShrink: 0, border: `2px solid ${task.completed ? 'var(--accent)' : 'var(--border)'}`,
+        background: task.completed ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {task.completed && <Check size={18} color="#fff" strokeWidth={3} />}
+      </button>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 15, textDecoration: task.completed ? 'line-through' : 'none', opacity: task.completed ? 0.6 : 1 }}>
+          {task.name}
+        </div>
+        {task.notes && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{task.notes}</div>}
+      </div>
+      <button onClick={onDelete} style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', padding: 4, flexShrink: 0 }}>
+        <Trash2 size={15} />
+      </button>
+    </div>
   );
 }
 
@@ -646,7 +718,7 @@ function EmptyState({ onAdd, text }) {
   );
 }
 
-function CalendarView({ routines, logs, calendarMonth, setCalendarMonth, selectedDate, setSelectedDate, selectedStats, onToggle, isDesktop }) {
+function CalendarView({ routines, logs, calendarMonth, setCalendarMonth, selectedDate, setSelectedDate, selectedStats, onToggle, isDesktop, tasks, onToggleTask, onDeleteTask, onAddTask }) {
   const year = calendarMonth.getFullYear(), month = calendarMonth.getMonth();
   const firstDay = new Date(year, month, 1);
   const startOffset = firstDay.getDay();
@@ -734,6 +806,22 @@ function CalendarView({ routines, logs, calendarMonth, setCalendarMonth, selecte
               </div>
             ))}
           </>
+        )}
+      </div>
+
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: 20, marginTop: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <span className="num-font" style={{ fontWeight: 700, fontSize: 15 }}>Tasks for this day</span>
+          <button onClick={onAddTask} style={{ display: 'flex', alignItems: 'center', gap: 4, border: 'none', background: 'transparent', color: 'var(--accent)', fontWeight: 600, fontSize: 13 }}>
+            <Plus size={15} /> Add task
+          </button>
+        </div>
+        {tasks.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No one-off tasks for this day.</div>
+        ) : (
+          tasks.map(t => (
+            <TaskRow key={t.id} task={t} onToggle={() => onToggleTask(t.id)} onDelete={() => onDeleteTask(t.id)} />
+          ))
         )}
       </div>
     </PageWrap>
@@ -942,6 +1030,48 @@ function RoutineModal({ initial, onSave, onClose }) {
           width: '100%', border: 'none', background: name.trim() ? 'var(--accent)' : 'var(--border)', color: '#fff',
           fontWeight: 700, fontSize: 14.5, padding: '14px 0', borderRadius: 14,
         }}>{initial ? 'Save changes' : 'Add routine'}</button>
+      </div>
+    </div>
+  );
+}
+
+function TaskModal({ defaultDate, onSave, onClose }) {
+  const [name, setName] = useState('');
+  const [date, setDate] = useState(defaultDate);
+  const [notes, setNotes] = useState('');
+
+  function handleSave() {
+    if (!name.trim()) return;
+    onSave({ name, date, notes });
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,19,32,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 60 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: 'var(--surface)', width: '100%', maxWidth: 480, borderRadius: '24px 24px 0 0',
+        padding: '20px 20px calc(20px + env(safe-area-inset-bottom))',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <span className="num-font" style={{ fontWeight: 700, fontSize: 17 }}>New task</span>
+          <button onClick={onClose} style={{ border: 'none', background: 'var(--surface-alt)', borderRadius: 10, padding: 7 }}><X size={16} /></button>
+        </div>
+
+        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
+          A one-off item for a single day — not a recurring routine, no streaks. It'll show up on that date only.
+        </p>
+
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Task name" style={{ width: '100%', fontSize: 15, fontWeight: 600, padding: '0 14px', border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg)', color: 'var(--text)', height: 48, marginBottom: 14 }} />
+
+        <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Date</label>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ display: 'block', margin: '8px 0 14px', fontSize: 14, padding: '0 12px', border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg)', color: 'var(--text)', height: 44, width: '100%' }} />
+
+        <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Notes</label>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Any extra detail…" style={{ width: '100%', marginTop: 8, marginBottom: 18, fontSize: 13.5, padding: 12, border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg)', color: 'var(--text)', resize: 'none', fontFamily: 'inherit' }} />
+
+        <button onClick={handleSave} disabled={!name.trim()} style={{
+          width: '100%', border: 'none', background: name.trim() ? 'var(--accent)' : 'var(--border)', color: '#fff',
+          fontWeight: 700, fontSize: 14.5, padding: '14px 0', borderRadius: 14,
+        }}>Add task</button>
       </div>
     </div>
   );
