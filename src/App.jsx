@@ -581,7 +581,7 @@ function PageWrap({ children, isDesktop }) {
 function HomeView({ routines, logs, stats, onToggle, isDesktop, overallCurrentStreak, onAdd }) {
   const dayStr = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const greeting = hour < 12 ? 'Good morning, S D' : hour < 18 ? 'Good afternoon, S D' : 'Good evening, S D';
   const pct = Math.max(0, stats.percent);
   const color = pct >= 80 ? 'var(--success)' : pct >= 1 ? 'var(--warning)' : 'var(--accent)';
   return (
