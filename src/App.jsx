@@ -140,6 +140,7 @@ export default function ArcTracker() {
   const [routines, setRoutines] = useState(DEFAULT_ROUTINES);
   const [logs, setLogs] = useState({});
   const [darkMode, setDarkMode] = useState(false);
+  const [userName, setUserName] = useState('');
   const [view, setView] = useState('home');
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [calendarMonth, setCalendarMonth] = useState(new Date());
@@ -173,6 +174,9 @@ export default function ArcTracker() {
         if (data.routines?.length) setRoutines(data.routines);
         if (data.logs) setLogs(data.logs);
         if (typeof data.darkMode === 'boolean') setDarkMode(data.darkMode);
+        setUserName(typeof data.userName === 'string' ? data.userName : (user.displayName || ''));
+      } else {
+        setUserName(user.displayName || '');
       }
       setLoaded(true);
     }, (err) => { console.error('Sync error', err); setLoaded(true); });
@@ -185,11 +189,11 @@ export default function ArcTracker() {
     if (!loaded || !user) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      setDoc(doc(db, 'users', user.uid), { routines, logs, darkMode }, { merge: true })
+      setDoc(doc(db, 'users', user.uid), { routines, logs, darkMode, userName }, { merge: true })
         .catch((e) => console.error('Save failed', e));
     }, 500);
     return () => clearTimeout(saveTimer.current);
-  }, [routines, logs, darkMode, loaded, user]);
+  }, [routines, logs, darkMode, userName, loaded, user]);
 
   const toggleRoutine = useCallback((dateStr, routineId) => {
     setLogs(prev => {
@@ -455,6 +459,7 @@ export default function ArcTracker() {
               isDesktop={isDesktop}
               overallCurrentStreak={overallCurrentStreak}
               onAdd={() => { setModalRoutine(null); setShowModal(true); }}
+              userName={userName}
             />
           )}
           {view === 'calendar' && (
@@ -495,6 +500,7 @@ export default function ArcTracker() {
               routineCount={routines.length}
               user={user}
               onSignOut={() => signOut(auth)}
+              userName={userName} setUserName={setUserName}
             />
           )}
         </main>
@@ -578,10 +584,11 @@ function PageWrap({ children, isDesktop }) {
   );
 }
 
-function HomeView({ routines, logs, stats, onToggle, isDesktop, overallCurrentStreak, onAdd }) {
+function HomeView({ routines, logs, stats, onToggle, isDesktop, overallCurrentStreak, onAdd, userName }) {
   const dayStr = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning, S D' : hour < 18 ? 'Good afternoon, S D' : 'Good evening, S D';
+  const base = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const greeting = userName.trim() ? `${base}, ${userName.trim().split(' ')[0]}` : base;
   const pct = Math.max(0, stats.percent);
   const color = pct >= 80 ? 'var(--success)' : pct >= 1 ? 'var(--warning)' : 'var(--accent)';
   return (
@@ -940,7 +947,7 @@ function RoutineModal({ initial, onSave, onClose }) {
   );
 }
 
-function SettingsView({ darkMode, setDarkMode, onExport, confirmReset, setConfirmReset, onReset, isDesktop, routineCount, user, onSignOut }) {
+function SettingsView({ darkMode, setDarkMode, onExport, confirmReset, setConfirmReset, onReset, isDesktop, routineCount, user, onSignOut, userName, setUserName }) {
   return (
     <PageWrap isDesktop={isDesktop}>
       <h1 className="num-font" style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>Settings</h1>
@@ -948,6 +955,24 @@ function SettingsView({ darkMode, setDarkMode, onExport, confirmReset, setConfir
       <SettingsRow icon={Sparkles} title={user?.displayName || 'Account'} desc={user?.email || 'Signed in'}>
         <button onClick={onSignOut} style={{ border: '1px solid var(--border)', background: 'var(--surface-alt)', borderRadius: 10, padding: '8px 14px', fontSize: 12.5, fontWeight: 600 }}>Sign out</button>
       </SettingsRow>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '14px 16px', marginBottom: 10 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface-alt)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Sparkles size={17} color="var(--accent)" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Greeting name</div>
+          <input
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+            placeholder="e.g. Sanjeev"
+            style={{
+              width: '100%', fontSize: 13.5, padding: '9px 12px', border: '1px solid var(--border)',
+              borderRadius: 10, background: 'var(--bg)', color: 'var(--text)',
+            }}
+          />
+        </div>
+      </div>
 
       <SettingsRow icon={darkMode ? Moon : Sun} title="Appearance" desc={darkMode ? 'Dark mode is on' : 'Light mode is on'}>
         <button onClick={() => setDarkMode(!darkMode)} style={{
